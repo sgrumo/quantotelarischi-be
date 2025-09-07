@@ -6,7 +6,6 @@
 
 # General application configuration
 import Config
-
 config :quantomelarischio,
   generators: [timestamp_type: :utc_datetime]
 
