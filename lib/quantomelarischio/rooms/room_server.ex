@@ -1,8 +1,6 @@
 defmodule Quantomelarischio.Rooms.RoomServer do
   use GenServer
 
-  @max_users 2
-
   def start_link(room_id) do
     GenServer.start_link(__MODULE__, room_id, name: via_tuple(room_id))
   end
@@ -19,8 +17,8 @@ defmodule Quantomelarischio.Rooms.RoomServer do
     _ -> :ok
   end
 
-  def send_challenge(room_id, challenged_id) do
-    GenServer.call(via_tuple(room_id), {:send_challenge, challenged_id})
+  def send_challenge(room_id, challenge_description) do
+    GenServer.call(via_tuple(room_id), {:send_challenge, challenge_description})
   rescue
     _ -> {:error, :room_not_found}
   end
@@ -37,8 +35,8 @@ defmodule Quantomelarischio.Rooms.RoomServer do
     _ -> {:error, :room_not_found}
   end
 
-  def place_bet(room_id, user_id, action) do
-    GenServer.call(via_tuple(room_id), {:place_bet, user_id, action})
+  def place_bet(room_id, user_id, bet_amount) do
+    GenServer.call(via_tuple(room_id), {:place_bet, user_id, bet_amount})
   rescue
     _ -> {:error, :room_not_found}
   end
@@ -61,7 +59,12 @@ defmodule Quantomelarischio.Rooms.RoomServer do
     _ -> :ok
   end
 
-  # GenServer callbacks
+  def reset_game(room_id) do
+    GenServer.call(via_tuple(room_id), :reset_game)
+  rescue
+    _ -> {:error, :room_not_found}
+  end
+
   @impl true
   def init(room_id) do
     {:ok,
@@ -72,20 +75,50 @@ defmodule Quantomelarischio.Rooms.RoomServer do
        challenged_id: nil,
        challenger_bet_amount: nil,
        challenged_bet_amount: nil,
+       challenge_description: nil,
        created_at: DateTime.utc_now()
      }}
   end
 
   @impl true
-  def handle_call({:join, _user_id}, _from, %{users: users} = state)
-      when length(users) >= @max_users do
+  def handle_call(
+        {:join, user_id},
+        _from,
+        %{challenger_id: challenger_id, challenged_id: challenged_id} = state
+      )
+      when challenged_id == user_id or challenger_id == user_id do
+    {:reply, {:error, :user_already_inside}, state}
+  end
+
+  @impl true
+  def handle_call(
+        {:join, _user_id},
+        _from,
+        %{challenger_id: challenger_id, challenged_id: challenged_id} = state
+      )
+      when challenger_id != nil and challenged_id != nil do
     {:reply, {:error, :room_full}, state}
   end
 
   @impl true
-  def handle_call({:join, user_id}, _from, state) do
-    new_state = %{state | challenger_id: user_id}
-    {:reply, :ok, new_state}
+  def handle_call(
+        {:join, user_id},
+        _from,
+        %{challenger_id: challenger_id, challenged_id: challenged_id, room_id: room_id} = state
+      ) do
+    new_state =
+      case {challenged_id, challenger_id} do
+        {_, nil} -> %{state | challenger_id: user_id}
+        {nil, _} -> %{state | challenged_id: user_id}
+      end
+
+    {:reply,
+     {:ok,
+      %{
+        room_id: room_id,
+        challenged_id: new_state.challenged_id,
+        challenger_id: new_state.challenger_id
+      }}, new_state}
   end
 
   @impl true
@@ -140,23 +173,75 @@ defmodule Quantomelarischio.Rooms.RoomServer do
           challenger_id: challenger_id
         } = state
       ) do
+    if amount >= challenge_amount or amount < 1 do
+      {:error, :invalid_bet_amount}
+    end
+
+    # case validate_bet_amount(amount, challenge_amount) do
+    #   {:error, :invalid_bet_amount} -> {:reply, {:error, :invalid_amount}, state}
+    #   :ok -> continue_with_bet_placement()
+    # end
+
     new_state =
-      case {user_id, challenger_id, challenged_id} do
-        {id, id, _} -> %{state | challenger_bet_amount: amount}
-        {id, _, id} -> %{state | challenged_bet_amount: amount}
+      case user_id do
+        ^challenger_id -> %{state | challenger_bet_amount: amount}
+        ^challenged_id -> %{state | challenged_bet_amount: amount}
         _ -> state
       end
 
-    if new_state.challenger_bet_amount != nil and new_state.challenged_bet_amount != nil do
-      if challenge_amount == new_state.challenger_bet_amount + new_state.challenged_bet_amount or
-           new_state.challenger_bet_amount == new_state.challenged_bet_amount do
-        {:reply, {:ok, :bet_complete}}
-      else
-        {:reply, {:ok, :bet_lost}}
-      end
-    end
+    case {new_state.challenger_bet_amount, new_state.challenged_bet_amount} do
+      {nil, _} ->
+        {:reply, :ok, new_state}
 
-    {:reply, :ok}
+      {_, nil} ->
+        {:reply, :ok, new_state}
+
+      {challenger_amount, challenged_amount} ->
+        total_bet = challenger_amount + challenged_amount
+
+        cond do
+          total_bet == challenge_amount ->
+            {:reply,
+             {:ok,
+              %{
+                status: "completed",
+                challenger_bet_amount: challenger_amount,
+                challenged_bet_amount: challenged_amount
+              }}, new_state}
+
+          challenger_amount == challenged_amount ->
+            {:reply,
+             {:ok,
+              %{
+                status: "completed",
+                challenger_bet_amount: challenger_amount,
+                challenged_bet_amount: challenged_amount
+              }}, new_state}
+
+            {:reply,
+             {:ok,
+              %{
+                status: "not_completed",
+                challenger_bet_amount: challenger_amount,
+                challenged_bet_amount: challenged_amount
+              }}, new_state}
+        end
+    end
+  end
+
+  @impl true
+  def handle_call(:reset_game, _from, state) do
+    new_state = %{
+      state
+      | challenge_amount: nil,
+        challenger_id: nil,
+        challenged_id: nil,
+        challenger_bet_amount: nil,
+        challenged_bet_amount: nil,
+        challenge_description: nil
+    }
+
+    {:reply, :ok, new_state}
   end
 
   @impl true
@@ -194,5 +279,14 @@ defmodule Quantomelarischio.Rooms.RoomServer do
 
   defp via_tuple(room_id) do
     {:via, Registry, {Quantomelarischio.RoomRegistry, room_id}}
+  end
+
+  defp validate_bet_amount(bet_amount, challenge_amount)
+       when is_number(bet_amount) and is_number(challenge_amount) do
+    if bet_amount > 1 and bet_amount < challenge_amount do
+      :ok
+    else
+      {:error, :invalid_bet_amount}
+    end
   end
 end

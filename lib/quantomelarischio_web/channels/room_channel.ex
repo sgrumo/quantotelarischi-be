@@ -3,15 +3,23 @@ defmodule QuantomelarischioWeb.RoomChannel do
   alias Quantomelarischio.Rooms
   use QuantomelarischioWeb, :channel
 
-  @possible_messages ["accept_challenge", "decline_challenge", "place_bet", "forfeit_bet"]
+  @possible_messages [
+    "send_challenge",
+    "accept_challenge",
+    "decline_challenge",
+    "place_bet",
+    "forfeit_bet",
+    "reset_game"
+  ]
   @impl true
   def join("room:" <> room_id, _params, socket) do
     user_id = socket.assigns.user_id
 
     case Rooms.join_room(room_id, user_id) do
-      {:ok, users} ->
+      {:ok, roomInfo} ->
         socket = assign(socket, :room_id, room_id)
-        {:ok, %{users: users}, socket}
+        send(self(), {:after_join, roomInfo})
+        {:ok, %{roomInfo: roomInfo, userId: user_id}, socket}
 
       {:error, reason} ->
         {:error, %{reason: reason}}
@@ -33,7 +41,14 @@ defmodule QuantomelarischioWeb.RoomChannel do
       when event in @possible_messages do
     case BetHandler.handle(event, payload, socket) do
       {:reply, response, socket} -> {:reply, response, socket}
-      _ -> {:reply, {:error, %{reason: "Invalid handler response"}}, socket}
+      {:reply, {:ok, socket}} -> {:reply, :ok, socket}
+      _ -> {:reply, {:error, %{reason: "Error in handling"}}, socket}
     end
+  end
+
+  @impl true
+  def handle_info({:after_join, payload}, socket) do
+    broadcast_from!(socket, "user_joined", payload)
+    {:noreply, socket}
   end
 end

@@ -3,17 +3,17 @@ defmodule QuantomelarischioWeb.Channels.Handlers.BetHandler do
   alias QuantomelarischioWeb.Endpoint
 
   def handle(
-        "challenge_sent",
-        %{"amount" => amount},
+        "send_challenge",
+        %{"challenge_description" => challenge_description},
         socket
       ) do
     room_id = socket.assigns.room_id
     # user_id = socket.assigns.user_id
 
-    case Rooms.send_challenge(room_id, amount) do
+    case Rooms.send_challenge(room_id, challenge_description) do
       {:ok, _challenge} ->
         Endpoint.broadcast("room:#{room_id}", "challenge_received", %{
-          amount: amount
+          challenge_description: challenge_description
         })
 
         {:reply, {:ok, socket}}
@@ -30,13 +30,10 @@ defmodule QuantomelarischioWeb.Channels.Handlers.BetHandler do
     case Rooms.accept_challenge(room_id, user_id, amount) do
       {:ok, bet} ->
         Endpoint.broadcast("room:#{room_id}", "challenge_accepted", %{
-          bet_id: bet.id,
-          challenger_id: bet.challenger_id,
-          challenged_id: bet.challenged_id,
-          amount: bet.amount
+          amount: bet
         })
 
-        {:reply, {:ok, %{bet_id: bet.id}}, socket}
+        {:reply, :ok, socket}
 
       {:error, reason} ->
         {:reply, {:error, %{reason: reason}}, socket}
@@ -60,21 +57,35 @@ defmodule QuantomelarischioWeb.Channels.Handlers.BetHandler do
     end
   end
 
-  def handle("place_bet", %{"bet_id" => bet_id, "amount" => amount}, socket) do
+  def handle("place_bet", %{"amount" => amount}, socket) do
     room_id = socket.assigns.room_id
     user_id = socket.assigns.user_id
 
-    case Rooms.place_bet(room_id, bet_id, user_id, amount) do
+    case Rooms.place_bet(room_id, user_id, amount) do
+      :ok ->
+        {:reply, :ok, socket}
+
       {:ok, result} ->
-        if result.status == "completed" do
-          Endpoint.broadcast("room:#{room_id}", "bet_completed", %{
-            bet_id: bet_id,
-            winner_id: result.winner_id,
-            amount: result.amount
-          })
-        end
+        Endpoint.broadcast("room:#{room_id}", "bet_completed", %{
+          challenger_amount: result.challenger_bet_amount,
+          challenged_amount: result.challenged_bet_amount,
+          status: result.status
+        })
 
         {:reply, {:ok, result}, socket}
+
+      {:error, reason} ->
+        {:reply, {:error, %{reason: reason}}, socket}
+    end
+  end
+
+  def handle("reset_game", _payload, socket) do
+    room_id = socket.assigns.room_id
+
+    case Rooms.reset_game(room_id) do
+      :ok ->
+        Endpoint.broadcast("room:#{room_id}", "game_reset", {})
+        {:reply, :ok, socket}
 
       {:error, reason} ->
         {:reply, {:error, %{reason: reason}}, socket}
