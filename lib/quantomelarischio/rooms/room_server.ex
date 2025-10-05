@@ -235,8 +235,6 @@ defmodule Quantomelarischio.Rooms.RoomServer do
     new_state = %{
       state
       | challenge_amount: nil,
-        challenger_id: nil,
-        challenged_id: nil,
         challenger_bet_amount: nil,
         challenged_bet_amount: nil,
         challenge_description: nil
