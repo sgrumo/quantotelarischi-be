@@ -11,8 +11,10 @@ defmodule QuantomelarischioWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  @allowed_origins Application.compile_env(:quantomelarischio, :allowed_origins, false)
+
   socket "/socket", QuantomelarischioWeb.UserSocket,
-    websocket: true,
+    websocket: [check_origin: @allowed_origins],
     longpoll: false,
     auth_token: false
 
