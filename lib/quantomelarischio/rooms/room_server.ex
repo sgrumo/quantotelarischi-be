@@ -218,6 +218,7 @@ defmodule Quantomelarischio.Rooms.RoomServer do
                 challenged_bet_amount: challenged_amount
               }}, new_state}
 
+          true ->
             {:reply,
              {:ok,
               %{
