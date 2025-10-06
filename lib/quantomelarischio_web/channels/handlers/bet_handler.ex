@@ -84,7 +84,7 @@ defmodule QuantomelarischioWeb.Channels.Handlers.BetHandler do
 
     case Rooms.reset_game(room_id) do
       :ok ->
-        Endpoint.broadcast("room:#{room_id}", "game_reset", {})
+        Endpoint.broadcast("room:#{room_id}", "game_reset", %{})
         {:reply, :ok, socket}
 
       {:error, reason} ->
